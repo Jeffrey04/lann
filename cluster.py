@@ -89,46 +89,41 @@ def node_build(points, leaf_max=5, node_id='ROOT'):
 def tree(points, leaf_max=5, n_jobs=1):
     result = {}
 
-    #tasks = [partial(node_build, points, leaf_max)]
-    #while True:
-    #    tasks_next = []
-    #    for i, task in enumerate(tasks):
-    #        node, sub_tasks = task()
+    tasks = [partial(node_build, points, leaf_max)]
+    while tasks:
+        tasks_next = []
+        for task in tasks:
+            node, sub_tasks = task()
 
-    #        tasks_next = tasks_next + sub_tasks
-    #        result[node[0]] = node[1]
+            tasks_next = tasks_next + sub_tasks
+            result[node[0]] = node[1]
 
-    #        print('{}/{}'.format(i + 1, len(tasks)))
+        tasks = tasks_next
 
-    #    tasks = tasks_next
+    return result
 
-    #    if len(tasks) == 0:
-    #        break
+    #with ThreadPoolExecutor(max_workers=n_jobs) as pool:
+    #    tasks = [partial(node_build, points, leaf_max)]
+    #    while True:
+    #        jobs = []
 
-    #return result
+    #        for task in tasks:
+    #            jobs.append(pool.submit(task))
 
-    with ThreadPoolExecutor(max_workers=n_jobs) as pool:
-        tasks = [partial(node_build, points, leaf_max)]
-        while True:
-            jobs = []
+    #        tasks = []
 
-            for task in tasks:
-                jobs.append(pool.submit(task))
+    #        for job in jobs:
+    #            node, sub_tasks = job.result()
 
-            tasks = []
+    #            for st in sub_tasks:
+    #                tasks.append(st)
 
-            for job in jobs:
-                node, sub_tasks = job.result()
+    #            result[node[0]] = node[1]
 
-                for st in sub_tasks:
-                    tasks.append(st)
+    #        if len(tasks) == 0:
+    #            break
 
-                result[node[0]] = node[1]
-
-            if len(tasks) == 0:
-                break
-
-        return result
+    #    return result
 
 def leaves_get(tree):
     result = []
@@ -143,17 +138,25 @@ def leaves_get(tree):
 def leaves_nearest(point, tree, threshold, branch_id='ROOT', n_jobs=1):
     result = []
 
-    if tree[branch_id]['type'] == 'leaf':
-        result.append(tree[branch_id])
-    else:
-        delta = tree[branch_id]['func'](point)
+    branches = [branch_id]
 
-        if delta > 0:
-            result = leaves_nearest(point, tree, threshold, tree[branch_id]['children'][1])
-        elif delta > -threshold:
-            result = leaves_nearest(point, tree, threshold, tree[branch_id]['children'][0]) + leaves_nearest(point, tree, threshold, tree[branch_id]['children'][1])
-        else:
-            result = leaves_nearest(point, tree, threshold, tree[branch_id]['children'][0])
+    while branches:
+        branches_next = []
+        for branch_id in branches:
+            if tree[branch_id]['type'] == 'leaf':
+                result.append(tree[branch_id])
+            else:
+                delta = tree[branch_id]['func'](point)
+
+                if threshold > 0 and -threshold < delta and delta < threshold:
+                    branches_next.append(tree[branch_id]['children'][0])
+                    branches_next.append(tree[branch_id]['children'][1])
+                elif delta > 0:
+                    branches_next.append(tree[branch_id]['children'][1])
+                else:
+                    branches_next.append(tree[branch_id]['children'][0])
+
+        branches = branches_next
 
     return result
 
@@ -209,16 +212,18 @@ def search_brute(query, points):
 
     return (distances[idx_min], points[idx_min])
 
-dim = 5 
+dim = 5
 points = []
 print('Generating Points')
 for _ in range(10000):
-    points.append(tuple([randint(0, 999) for __ in range(dim)]))
+    points.append(tuple([random() for __ in range(dim)]))
 
 print('Building Tree')
-_tree = tree(points, leaf_max=50, n_jobs=20)
+_tree = tree(points, leaf_max=5, n_jobs=20)
 
-query = tuple([randint(0, 999) for __ in range(dim)])
+print('total leaves: {}'.format(len([node for _, node in _tree.items() if node['type'] == 'leaf'])))
+
+query = tuple([random() for __ in range(dim)])
 
 #print('Given Query {}'.format(query))
 #print('Cluster Answer')
@@ -234,10 +239,10 @@ ganswer = search_brute(query, points)
 print('Search took {} seconds'.format(time.clock() - t0))
 print(ganswer)
 
-for threshold in range(0, int(1e7) + 1, 500):
-    print('Cluster Answer for threshold {}'.format(threshold))
+for threshold in range(0, int(1e7) + 1, 5):
+    print('Cluster Answer for threshold {}'.format(threshold / 100))
     t0 = time.clock()
-    nleaves = leaves_nearest(query, _tree, threshold, n_jobs=20)
+    nleaves = leaves_nearest(query, _tree, threshold / 100, n_jobs=20)
     canswer = search_tree(query, nleaves)
     print('Search took {} seconds'.format(time.clock() - t0))
     print('N-leaves: {}'.format(len(nleaves)))
@@ -251,26 +256,26 @@ for threshold in range(0, int(1e7) + 1, 500):
 
 #fig = plt.figure()
 #ax = fig.add_subplot(111)
-#
-#nleaves_uuid = [leaf['uuid'] for leaf in nleaves]
-#
+
+#nleaves_uuid = [leaf['id'] for leaf in nleaves]
+
 #color = [random() for _ in range(3)]
-#for leaf in leaves_get(_tree):
-#    leaf_color = [random() for _ in range(3)] if leaf['uuid'] in nleaves_uuid else color
-#
+#for leaf in [node for _, node in _tree.items() if node['type'] == 'leaf']:
+#    leaf_color = [random() for _ in range(3)] if leaf['id'] in nleaves_uuid else color
+
 #    for point in leaf['children']:
 #        ax.plot([point[0]],
 #                [point[1]],
 #                #[point[2]],
 #                color=leaf_color,
-#                marker='x',
+#                marker='x' if leaf['id'] in nleaves_uuid else '+',
 #                markersize=10 if point in [canswer[1], ganswer[1]] else 5)
-#
+
 #query_color = [random() for _ in range(3)]
 #ax.plot([query[0]],
 #        [query[1]],
 #        #[query[2]],
 #        color=query_color,
 #        marker='o')
-#
+
 #plt.show()
