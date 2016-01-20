@@ -5,21 +5,6 @@ from itertools import chain
 from functools import reduce, partial
 from scipy.spatial.distance import euclidean
 
-def point_add(id, vector, result={}):
-    result[id] = vector
-
-    return result
-
-def points_add(vectors, identifiers=None):
-    if identifiers:
-        return reduce(lambda result, i: point_add(identifiers[i], vectors[i], result),
-                      range(len(identifiers)),
-                      {})
-    else:
-        return reduce(lambda result, vector: point_add(uuid4(), vector, result),
-                      vectors,
-                      {})
-
 def node_build(points, point_ids, leaf_max=5, node_id='ROOT'):
     node, children = {}, []
 
@@ -62,11 +47,6 @@ def node_build(points, point_ids, leaf_max=5, node_id='ROOT'):
 
     return (node_id, node), children
 
-def split_points(points):
-    result = sample(points, 2)
-
-    return result if reduce(lambda result, incoming: result or incoming[0] - incoming[1] != 0, zip(*result), False) else split_points(points)
-
 def plane_normal(*points):
     return tuple(map(lambda incoming: incoming[0] - incoming[1],
                     zip(*points)))
@@ -86,22 +66,20 @@ def plane_point_distance_calculator(normal, point):
 def _ppd_calculator(point, normal, d):
     return ((reduce(lambda result, incoming: result + incoming[0] * incoming[1], zip(normal, point), 0) + d) / sqrt(reduce(lambda result, incoming: result + pow(incoming, 2), normal, 0)))
 
-def tree_build(points, leaf_max=5):
-    result = {}
-
-    builders = [partial(node_build, points, points.keys(), leaf_max)]
-    while builders:
-        builders_next = []
-
-        for builder in builders:
-            (node_id, node), builders_sub = builder()
-
-            builders_next = chain.from_iterable([builders_next, builders_sub])
-            result[node_id] = node
-
-        builders = builders_next
+def point_add(id, vector, result={}):
+    result[id] = vector
 
     return result
+
+def points_add(vectors, identifiers=None):
+    if identifiers:
+        return reduce(lambda result, i: point_add(identifiers[i], vectors[i], result),
+                      range(len(identifiers)),
+                      {})
+    else:
+        return reduce(lambda result, vector: point_add(uuid4(), vector, result),
+                      vectors,
+                      {})
 
 def query_neighbourhood(query, tree, threshold=0, start_id='ROOT'):
     result = []
@@ -132,3 +110,25 @@ def search(query, points, neighbourhood):
     distances = (euclidean(query, points[idx]) for idx in candidates)
 
     return sorted(zip(candidates, distances), key=lambda _: _[-1])
+
+def split_points(points):
+    result = sample(points, 2)
+
+    return result if reduce(lambda result, incoming: result or incoming[0] - incoming[1] != 0, zip(*result), False) else split_points(points)
+
+def tree_build(points, leaf_max=5):
+    result = {}
+
+    builders = [partial(node_build, points, points.keys(), leaf_max)]
+    while builders:
+        builders_next = []
+
+        for builder in builders:
+            (node_id, node), builders_sub = builder()
+
+            builders_next = chain.from_iterable([builders_next, builders_sub])
+            result[node_id] = node
+
+        builders = builders_next
+
+    return result
