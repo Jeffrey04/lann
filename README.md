@@ -59,3 +59,9 @@ print(result)
 * `points`: the dictionary of points
 * `neighbourhood`: the product of `query_neighbourhood`
 * Returns: a list of tuple, where each of them consists of the point identifier, and the corresponding distance score.
+
+## Future plans
+
+* Works with [gensim](https://radimrehurek.com/gensim/) corpus
+* Forest building and querying
+* Concurrency support
