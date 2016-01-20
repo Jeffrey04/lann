@@ -1,5 +1,7 @@
 # LANN
 
+[![NeighbourSearch](https://farm2.staticflickr.com/1541/24104435039_b186b59a2d.jpg)](https://www.flickr.com/photos/jeffrey04/24104435039/in/dateposted-public/)
+
 LANN ~~(Lame Approximate Neighbour Search)~~ is a Python re-implementation of [Annoy](https://github.com/spotify/annoy) mainly for Jeffrey04's learning (hence the 'L' in name)/experimental purpose. It does not bring anything new to the table, and is not meant for production use for now (probably wouldn't work with large scale real-life data). Like Annoy, the library can be used to search for the nearest points for a given query point in a vector space.
 
 It does not generate multiple trees to improve precision and recall for now. Also it does not store points in the tree. In order to use this library for searching, the points needs to be index-able, preferably in a dictionary-like structure.
