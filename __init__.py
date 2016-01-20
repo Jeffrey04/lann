@@ -5,8 +5,6 @@ from itertools import chain
 from functools import reduce, partial
 from scipy.spatial.distance import euclidean
 
-from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
-
 def point_add(id, vector, result={}):
     result[id] = vector
 
