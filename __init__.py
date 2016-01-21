@@ -16,7 +16,7 @@ def node_build(points, point_ids, leaf_max=5, node_id='ROOT'):
             'children': point_ids
         }
     else:
-        split = split_points([point for key, point in points.items() if key in point_ids])
+        split = split_points([points[idx] for idx in point_ids])
         distance_calc = plane_point_distance_calculator(
             plane_normal(*split),
             plane_point(*split))
