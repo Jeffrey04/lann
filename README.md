@@ -13,7 +13,7 @@ It does not generate multiple trees to improve precision and recall for now. Als
 ## Example Usage
 
 ```
-from lann import points_add, tree_build, query_neighbourhood, search
+from lann import points_add, point_convert, forest_build, forest_query_neighbourhood, search
 from uuid import uuid4
 from random import random
 
