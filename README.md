@@ -68,7 +68,7 @@ point_idx, distance = search(query, points, neighbourhood)[0]
 * `n_jobs` (optional, defaulted to `1`): maximum number of processes to spawn
 * Returns: a tuple of trees
 
-## query_neighbourhood(query, tree, threshold=0, start_id='ROOT')
+### query_neighbourhood(query, tree, threshold=0, start_id='ROOT')
 
 * `query`: the query point (converted by `point_convert`)
 * `tree`: product of `tree_build`
@@ -76,7 +76,7 @@ point_idx, distance = search(query, points, neighbourhood)[0]
 * `start_id` (optional, defaulted to the `ROOT` node): provides the possibility to defined where to start traversing the tree.
 * Returns: a list of proximity and leaf node tuples where the query point is close to (length depending on the `threshold` value)
 
-## forest_query_neighbourhood(query, forest, threshold=0, n_jobs=1)
+### forest_query_neighbourhood(query, forest, threshold=0, n_jobs=1)
 
 * `query`: the query point (converted by `point_convert`)
 * `forest`: product of `forest_build`
