@@ -178,13 +178,12 @@ def query_neighbourhood(tree, query, threshold=0, start_id='ROOT'):
 def search(query, points, neighbourhood, n=1):
     result = {}
 
-    for _, leaf in sorted(neighbourhood, key=lambda _: _[0]):
-        for idx in leaf['children']:
-            if idx not in result:
-                result[idx] = distance_euclidean(query, points['points'][idx], points['dimension'])
+    for idx in chain.from_iterable(leaf['children'] for _, leaf in sorted(neighbourhood, key=lambda _: _[0])):
+        if idx not in result:
+            result[idx] = distance_euclidean(query, points['points'][idx], points['dimension'])
 
-        if len(result) >= n:
-            break
+            if len(result) >= (n * 50):
+                break
 
     return sorted(result.items(), key=lambda _: _[-1])[:n]
 
