@@ -202,6 +202,9 @@ def split_points(points, dimension):
 def tree_build(points, leaf_max=5):
     result = {}
 
+    if len(points['points']) <= leaf_max:
+        raise Exception('Not enough points to generate tree')
+
     builders = [partial(node_build, points, points['points'].keys(), leaf_max)]
     while builders:
         builders_next = []
