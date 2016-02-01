@@ -3,6 +3,8 @@ from math import pow, sqrt
 from uuid import uuid4
 from itertools import chain
 from functools import reduce, partial
+from operator import sub
+from collections import defaultdict
 
 from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor
 
@@ -22,7 +24,7 @@ def common(alpha, beta):
     return zip(*result)
 
 def distance_euclidean(alpha, beta, dimension):
-    return sqrt(sum(pow(element(alpha, i) - element(beta, i), 2) for i in range(dimension)))
+    return sqrt(sum(pow(alpha.get(i, 0) - beta.get(i, 0), 2) for i in range(dimension)))
 
 def element(point, i):
     position = point['positions'].get(i, False)
@@ -44,18 +46,13 @@ def forest_build(points, tree_count, leaf_max=5, n_jobs=1):
 
 def forest_query_neighbourhood(query, forest, threshold=0, n_jobs=1):
     if n_jobs == 1:
-        return chain.from_iterable(query_neighbourhood(query, tree, threshold)
+        return chain.from_iterable(query_neighbourhood(tree, query, threshold)
                                    for tree in forest)
     else:
         with ThreadPoolExecutor(max_workers=n_jobs) as pool:
-            jobs = []
-            for tree in forest:
-                jobs.append(pool.submit(query_neighbourhood,
-                                        query,
-                                        tree,
-                                        threshold))
-
-            return chain.from_iterable(job.result() for job in jobs)
+            return chain.from_iterable(
+                pool.map(partial(query_neighbourhood, query=query, threshold=threshold),
+                         forest))
 
 def node_build(points, point_ids, leaf_max=5, node_id='ROOT'):
     node, children = {}, []
@@ -68,7 +65,8 @@ def node_build(points, point_ids, leaf_max=5, node_id='ROOT'):
             'children': point_ids
         }
     else:
-        split = split_points([points['points'][idx] for idx in point_ids])
+        split = split_points([points['points'][idx] for idx in point_ids],
+                             points['dimension'])
         distance_calc = plane_point_distance_calculator(
             plane_normal(*split, points['dimension']),
             plane_point(*split, points['dimension']),
@@ -101,10 +99,10 @@ def node_build(points, point_ids, leaf_max=5, node_id='ROOT'):
     return (node_id, node), children
 
 def plane_normal(alpha, beta, dimension):
-    return tuple(element(alpha, i) - element(beta, i) for i in range(dimension))
+    return tuple(alpha.get(i, 0) - beta.get(i, 0) for i in range(dimension))
 
 def plane_point(alpha, beta, dimension):
-    return tuple((element(alpha, i) + element(beta, i)) / 2. for i in range(dimension))
+    return tuple((alpha.get(i, 0) + beta.get(i, 0)) / 2. for i in range(dimension))
 
 def plane_point_distance_calculator(normal, point, dimension):
     return partial(_ppd_calculator,
@@ -116,7 +114,7 @@ def plane_point_distance_calculator(normal, point, dimension):
                    dimension=dimension)
 
 def _ppd_calculator(point, normal, d, dimension):
-    return ((sum([element(point, i) * normal[i] for i in range(dimension)]) + d) / sqrt(sum([pow(i, 2) for i in normal])))
+    return ((sum([point.get(i, 0) * normal[i] for i in range(dimension)]) + d) / sqrt(sum([pow(i, 2) for i in normal])))
 
 def point_add(id, vector, dimension, ptype, result={}):
     result[id] = point_convert(vector, ptype)
@@ -132,18 +130,20 @@ def point_convert(vector, ptype):
     return ptype_builder.get(ptype, point_convert_invalid)(vector)
 
 def point_convert_gensim(vector):
-    return {
-        'positions': dict([(idx, position) for position, (idx, _) in enumerate(vector)]),
-        'point': vector
-    }
+    return dict(vector)
+    #return {
+    #    'positions': dict([(idx, position) for position, (idx, _) in enumerate(vector)]),
+    #    'point': vector
+    #}
 
 def point_convert_list(vector):
-    point = [(idx, value) for idx, value in enumerate(vector) if value != 0]
+    return dict([(idx, value) for idx, value in enumerate(vector) if value != 0])
+    #point = [(idx, value) for idx, value in enumerate(vector) if value != 0]
 
-    return {
-        'positions': dict([(idx, position) for position, (idx, _) in enumerate(point)]),
-        'point': point
-    }
+    #return {
+    #    'positions': dict([(idx, position) for position, (idx, _) in enumerate(point)]),
+    #    'point': point
+    #}
 
 def point_convert_invalid(*_):
     raise Exception('Not supported')
@@ -173,7 +173,7 @@ def points_add(vectors, dimension, ptype, identifiers=None):
 
     return result
 
-def query_neighbourhood(query, tree, threshold=0, start_id='ROOT'):
+def query_neighbourhood(tree, query, threshold=0, start_id='ROOT'):
     result = []
 
     branch_ids = [(1., start_id)]
@@ -183,7 +183,7 @@ def query_neighbourhood(query, tree, threshold=0, start_id='ROOT'):
 
         for multiplier, branch_id in branch_ids:
             if tree[branch_id]['type'] == 'leaf':
-                result.append((multiplier, tree[branch_id]))
+                result.append((1 - multiplier, tree[branch_id]))
             else:
                 delta = tree[branch_id]['func'](query)
 
@@ -211,22 +211,34 @@ def search_leaf(result, leaf, points):
     for idx in leaf[-1]['children']:
         if idx not in searched:
             searched.append(idx)
-            rank.append(distance_euclidean(query, points['points'][idx], points['dimension']))
+            rank.append((idx,
+                         distance_euclidean(query, points['points'][idx], points['dimension'])))
 
     return searched, rank
 
 
-def search(query, points, neighbourhood):
-    distances = reduce(partial(search_leaf, points=points),
-                       reversed(sorted(neighbourhood, key=lambda _: _[0])),
-                       ([], []))
+def search(query, points, neighbourhood, n=1):
+    #_, result = reduce(partial(search_leaf, points=points),
+    #                   sorted(neighbourhood, key=lambda _: _[0]),
+    #                   ([], []))
 
-    return sorted(zip(*distances), key=lambda _: _[-1])
+    #return sorted(result, key=lambda _: _[-1])[:n]
+    result = {}
 
-def split_points(points):
+    for _, leaf in sorted(neighbourhood, key=lambda _: _[0]):
+        for idx in leaf['children']:
+            if idx not in result:
+                result[idx] = distance_euclidean(query, points['points'][idx], points['dimension'])
+
+        if len(result) == n:
+            break
+
+    return sorted(result.items(), key=lambda _: _[-1])[:n]
+
+def split_points(points, dimension):
     result = sample(points, 2)
 
-    return result if reduce(lambda result, incoming: result or incoming[0] - incoming[1] != 0, common(*[point['point'] for point in result]), False) else split_points(points)
+    return result if reduce(lambda _result, incoming: _result or sub(*[result[i].get(i, 0) for i in range(2)]) != 0, range(dimension), False) else split_points(points)
 
 def tree_build(points, leaf_max=5):
     result = {}
