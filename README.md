@@ -32,9 +32,7 @@ print('generating forest')
 forest = forest_build(points, 25, leaf_max=5, n_jobs=4)
 
 print('fetching neighbourhood')
-neighbourhood = forest_query_neighbourhood(query, forest, threshold=0, n_jobs=20)
-
-point_idx, distance = search(query, points, neighbourhood)[0]
+idx, distance = search(query, points, forest, 1)[0]
 ```
 
 ## API
@@ -53,13 +51,6 @@ point_idx, distance = search(query, points, neighbourhood)[0]
 * `ptype`: points are either `list` (a list of numeric values), or `gensim` for gensim-like corpus
 * Returns: point recognized by lann
 
-
-### tree_build(points, leaf_max=5)
-
-* `points`: output of `points_add`
-* `leaf_max` (optional, defaulted to `5`): maximum number of points to be stored in a leaf node
-* Returns: a flattened tree structure in a dictionary form
-
 ### forest_build(points, tree_count, leaf_max=5, n_jobs=1)
 
 * `points`: output of `points_add`
@@ -68,28 +59,15 @@ point_idx, distance = search(query, points, neighbourhood)[0]
 * `n_jobs` (optional, defaulted to `1`): maximum number of processes to spawn
 * Returns: a tuple of trees
 
-### query_neighbourhood(query, tree, threshold=0, start_id='ROOT')
-
-* `query`: the query point (converted by `point_convert`)
-* `tree`: product of `tree_build`
-* `threshold` (optional, defaulted to `0`): at `0`, only one leaf node is returned, the number of leaf nodes returned (hence the number of candidate points) increases as the threshold value increases.
-* `start_id` (optional, defaulted to the `ROOT` node): provides the possibility to defined where to start traversing the tree.
-* Returns: a list of proximity and leaf node tuples where the query point is close to (length depending on the `threshold` value)
-
-### forest_query_neighbourhood(query, forest, threshold=0, n_jobs=1)
-
-* `query`: the query point (converted by `point_convert`)
-* `forest`: product of `forest_build`
-* `threshold` (optional, defaulted to `0`): at `0`, only one leaf node is returned, the number of leaf nodes returned (hence the number of candidate points) increases as the threshold value increases.
-* `n_jobs` (optional, defaulted to `1`): maximum number of threads to spawn
-* Returns: a list of proximity and leaf node tuples where the query point is close to (length depending on the `threshold` value)
-
-### search(query, points, neighbourhood)
+### search(query, points, forest, n, threshold=None, n_jobs=1)
 
 * `query`: the query point (converted by `point_convert`)
 * `points`: output of `points_add`
-* `neighbourhood`: the product of `query_neighbourhood` / `forest_query_neighbourhood`
-* Returns: a list of tuple, where each of them consists of the point identifier, and the corresponding distance score.
+* `forest`: output of `forest_build`
+* `n`: number of points to return
+* `threshold` (optional, defaulted to `None` to use a heuristic value): at `0`, only one leaf node per tree is returned, the number of leaf nodes returned (as well as the number of candidate points) increases as the threshold value increases.
+* `n_jobs` (optional, defaulted to `1`): maximum number of threads to spawn
+* Returns: a list of tuple, where each of them consists of a point identifier, and the corresponding distance score for the point.
 
 ## Future plans
 
