@@ -183,7 +183,7 @@ def search(query, points, neighbourhood, n=1):
             if idx not in result:
                 result[idx] = distance_euclidean(query, points['points'][idx], points['dimension'])
 
-        if len(result) == n:
+        if len(result) >= n:
             break
 
     return sorted(result.items(), key=lambda _: _[-1])[:n]
