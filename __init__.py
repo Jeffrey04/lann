@@ -11,8 +11,10 @@ def distance_euclidean(alpha, beta, dimension):
     return sqrt(sum(pow(alpha.get(i, 0) - beta.get(i, 0), 2) for i in range(dimension)))
 
 def forest_build(points, tree_count, leaf_max=5, n_jobs=1):
+    result = {'count': tree_count, 'leaf_max': leaf_max}
+
     if n_jobs == 1:
-        return tuple(tree_build(points, leaf_max) for _ in range(tree_count))
+        return dict(result, forest=tuple(tree_build(points, leaf_max) for _ in range(tree_count)))
     else:
         with ProcessPoolExecutor(max_workers=n_jobs) as pool:
             jobs = []
@@ -21,17 +23,17 @@ def forest_build(points, tree_count, leaf_max=5, n_jobs=1):
                                         points,
                                         leaf_max))
 
-            return tuple(job.result() for job in jobs)
+            return dict(result, forest=tuple(job.result() for job in jobs))
 
 def forest_query_neighbourhood(query, forest, threshold=0, n_jobs=1):
     if n_jobs == 1:
         return chain.from_iterable(query_neighbourhood(tree, query, threshold)
-                                   for tree in forest)
+                                   for tree in forest['forest'])
     else:
         with ThreadPoolExecutor(max_workers=n_jobs) as pool:
             return chain.from_iterable(
                 pool.map(partial(query_neighbourhood, query=query, threshold=threshold),
-                         forest))
+                         forest['forest']))
 
 def node_build(points, point_ids, leaf_max=5, node_id='ROOT'):
     node, children = {}, []
@@ -175,14 +177,19 @@ def query_neighbourhood(tree, query, threshold=0, start_id='ROOT'):
     return result
 
 
-def search(query, points, neighbourhood, n=1):
-    result = {}
+def search(query, points, forest, n=1, threshold=None, n_jobs=1):
+    neighbourhood = forest_query_neighbourhood(query,
+                                               forest,
+                                               threshold if threshold else (points['dimension'] * 2e-2),
+                                               n_jobs)
+
+    result, candidate_max = {}, max(n, forest['leaf_max']) * forest['count']
 
     for idx in chain.from_iterable(leaf['children'] for _, leaf in sorted(neighbourhood, key=lambda _: _[0])):
         if idx not in result:
             result[idx] = distance_euclidean(query, points['points'][idx], points['dimension'])
 
-            if len(result) >= (n * 50):
+            if len(result) >= candidate_max:
                 break
 
     return sorted(result.items(), key=lambda _: _[-1])[:n]
