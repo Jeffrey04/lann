@@ -4,32 +4,11 @@ from uuid import uuid4
 from itertools import chain
 from functools import reduce, partial
 from operator import sub
-from collections import defaultdict
 
 from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor
 
-def common(alpha, beta):
-    idx_alpha, idx_beta = 0, 0
-    result = []
-    while alpha[idx_alpha:] and beta[idx_beta:]:
-        if alpha[idx_alpha][0] > beta[idx_beta][0]:
-            idx_beta = idx_beta + 1
-        elif alpha[idx_alpha][0] < beta[idx_beta][0]:
-            idx_alpha = idx_alpha + 1
-        else:
-            result.append((alpha[idx_alpha][-1], beta[idx_beta][-1]))
-            idx_alpha = idx_alpha + 1
-            idx_beta = idx_beta + 1
-
-    return zip(*result)
-
 def distance_euclidean(alpha, beta, dimension):
     return sqrt(sum(pow(alpha.get(i, 0) - beta.get(i, 0), 2) for i in range(dimension)))
-
-def element(point, i):
-    position = point['positions'].get(i, False)
-
-    return point['point'][position][-1] if position is not False else 0
 
 def forest_build(points, tree_count, leaf_max=5, n_jobs=1):
     if n_jobs == 1:
@@ -131,19 +110,9 @@ def point_convert(vector, ptype):
 
 def point_convert_gensim(vector):
     return dict(vector)
-    #return {
-    #    'positions': dict([(idx, position) for position, (idx, _) in enumerate(vector)]),
-    #    'point': vector
-    #}
 
 def point_convert_list(vector):
     return dict([(idx, value) for idx, value in enumerate(vector) if value != 0])
-    #point = [(idx, value) for idx, value in enumerate(vector) if value != 0]
-
-    #return {
-    #    'positions': dict([(idx, position) for position, (idx, _) in enumerate(point)]),
-    #    'point': point
-    #}
 
 def point_convert_invalid(*_):
     raise Exception('Not supported')
@@ -205,24 +174,8 @@ def query_neighbourhood(tree, query, threshold=0, start_id='ROOT'):
 
     return result
 
-def search_leaf(result, leaf, points):
-    searched, rank = result
-
-    for idx in leaf[-1]['children']:
-        if idx not in searched:
-            searched.append(idx)
-            rank.append((idx,
-                         distance_euclidean(query, points['points'][idx], points['dimension'])))
-
-    return searched, rank
-
 
 def search(query, points, neighbourhood, n=1):
-    #_, result = reduce(partial(search_leaf, points=points),
-    #                   sorted(neighbourhood, key=lambda _: _[0]),
-    #                   ([], []))
-
-    #return sorted(result, key=lambda _: _[-1])[:n]
     result = {}
 
     for _, leaf in sorted(neighbourhood, key=lambda _: _[0]):
