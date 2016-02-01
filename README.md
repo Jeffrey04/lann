@@ -68,10 +68,10 @@ point_idx, distance = search(query, points, neighbourhood)[0]
 * `n_jobs` (optional, defaulted to `1`): maximum number of processes to spawn
 * Returns: a tuple of trees
 
-### query_neighbourhood(query, tree, threshold=0, start_id='ROOT')
+### query_neighbourhood(tree, query, threshold=0, start_id='ROOT')
 
-* `query`: the query point (converted by `point_convert`)
 * `tree`: product of `tree_build`
+* `query`: the query point (converted by `point_convert`)
 * `threshold` (optional, defaulted to `0`): at `0`, only one leaf node is returned, the number of leaf nodes returned (hence the number of candidate points) increases as the threshold value increases.
 * `start_id` (optional, defaulted to the `ROOT` node): provides the possibility to defined where to start traversing the tree.
 * Returns: a list of proximity and leaf node tuples where the query point is close to (length depending on the `threshold` value)
