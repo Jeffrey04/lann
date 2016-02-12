@@ -11,10 +11,14 @@ def distance_euclidean(alpha, beta, dimension):
     return sqrt(sum(pow(alpha.get(i, 0) - beta.get(i, 0), 2) for i in range(dimension)))
 
 def forest_build(points, tree_count, leaf_max=5, n_jobs=1):
-    result = {'count': tree_count, 'leaf_max': leaf_max}
+    result, roots, forest = {'count': tree_count, 'leaf_max': leaf_max}, [], {}
 
     if n_jobs == 1:
-        return dict(result, forest=tuple(tree_build(points, leaf_max) for _ in range(tree_count)))
+        for root_id, tree in (tree_build(points, leaf_max) for _ in range(tree_count)):
+            roots.append(root_id)
+            forest = dict(forest, **tree)
+
+        return dict(result, forest=forest, roots=roots)
     else:
         with ProcessPoolExecutor(max_workers=n_jobs) as pool:
             jobs = []
@@ -23,19 +27,23 @@ def forest_build(points, tree_count, leaf_max=5, n_jobs=1):
                                         points,
                                         leaf_max))
 
-            return dict(result, forest=tuple(job.result() for job in jobs))
+            for root_id, tree in (job.result() for job in jobs):
+                roots.append(root_id)
+                forest = dict(forest, **tree)
+
+            return dict(result, forest=forest, roots=roots)
 
 def forest_query_neighbourhood(query, forest, threshold=0, n_jobs=1):
     if n_jobs == 1:
-        return chain.from_iterable(query_neighbourhood(tree, query, threshold)
-                                   for tree in forest['forest'])
+        return chain.from_iterable(query_neighbourhood(root_id, forest['forest'], query, threshold)
+                                   for root_id in forest['roots'])
     else:
         with ThreadPoolExecutor(max_workers=n_jobs) as pool:
             return chain.from_iterable(
-                pool.map(partial(query_neighbourhood, query=query, threshold=threshold),
-                         forest['forest']))
+                pool.map(partial(query_neighbourhood, forest=forest['forest'], query=query, threshold=threshold),
+                         forest['roots']))
 
-def node_build(points, point_ids, leaf_max=5, node_id='ROOT'):
+def node_build(points, point_ids, node_id, leaf_max=5):
     node, children = {}, []
 
     if len(point_ids) <= leaf_max:
@@ -53,7 +61,7 @@ def node_build(points, point_ids, leaf_max=5, node_id='ROOT'):
             plane_point(*split, points['dimension']),
             points['dimension'])
         branches = {False: [], True: []}
-        child_ids = {False: uuid4(), True: uuid4()}
+        child_ids = {False: str(uuid4()), True: str(uuid4())}
 
         for idx in point_ids:
             branches[distance_calc(points['points'][idx]) > 0].append(idx)
@@ -69,13 +77,13 @@ def node_build(points, point_ids, leaf_max=5, node_id='ROOT'):
         children.append(partial(node_build,
                                 points,
                                 branches[False],
-                                leaf_max,
-                                child_ids[False]))
+                                child_ids[False],
+                                leaf_max))
         children.append(partial(node_build,
                                 points,
                                 branches[True],
-                                leaf_max,
-                                child_ids[True]))
+                                child_ids[True],
+                                leaf_max))
 
     return (node_id, node), children
 
@@ -144,7 +152,7 @@ def points_add(vectors, dimension, ptype, identifiers=None):
 
     return result
 
-def query_neighbourhood(tree, query, threshold=0, start_id='ROOT'):
+def query_neighbourhood(start_id, forest, query, threshold=0):
     result = []
 
     branch_ids = [(1., start_id)]
@@ -153,24 +161,24 @@ def query_neighbourhood(tree, query, threshold=0, start_id='ROOT'):
         branches_next = []
 
         for multiplier, branch_id in branch_ids:
-            if tree[branch_id]['type'] == 'leaf':
-                result.append((1 - multiplier, tree[branch_id]))
+            if forest[branch_id]['type'] == 'leaf':
+                result.append((1 - multiplier, forest[branch_id]))
             else:
-                delta = tree[branch_id]['func'](query)
+                delta = forest[branch_id]['func'](query)
 
                 if threshold > 0 and delta > 0 and delta <= threshold:
                     branches_next.append((multiplier * 0.9,
-                                          tree[branch_id]['children'][False]))
+                                          forest[branch_id]['children'][False]))
                     branches_next.append((multiplier * 1.,
-                                          tree[branch_id]['children'][True]))
+                                          forest[branch_id]['children'][True]))
                 elif threshold > 0 and delta <= 0 and -threshold <= delta:
                     branches_next.append((multiplier * 1.,
-                                          tree[branch_id]['children'][False]))
+                                          forest[branch_id]['children'][False]))
                     branches_next.append((multiplier * 0.9,
-                                          tree[branch_id]['children'][True]))
+                                          forest[branch_id]['children'][True]))
                 else:
                     branches_next.append((multiplier * 1.,
-                                          tree[branch_id]['children'][delta > 0]))
+                                          forest[branch_id]['children'][delta > 0]))
 
             branch_ids = branches_next
 
@@ -200,12 +208,12 @@ def split_points(points, dimension):
     return result if reduce(lambda _result, incoming: _result or sub(*[result[i].get(i, 0) for i in range(2)]) != 0, range(dimension), False) else split_points(points)
 
 def tree_build(points, leaf_max=5):
-    result = {}
+    root_id, result = str(uuid4()), {}
 
     if len(points['points']) <= leaf_max:
         raise Exception('Not enough points to generate tree')
 
-    builders = [partial(node_build, points, points['points'].keys(), leaf_max)]
+    builders = [partial(node_build, points, points['points'].keys(), root_id, leaf_max)]
     while builders:
         builders_next = []
 
@@ -217,4 +225,4 @@ def tree_build(points, leaf_max=5):
 
         builders = builders_next
 
-    return result
+    return root_id, result
