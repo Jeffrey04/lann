@@ -34,6 +34,23 @@ def forest_build(points, tree_count, leaf_max=5, n_jobs=1):
 
             return dict(result, forest=forest, roots=roots)
 
+def forest_get_dot(forest, count=1):
+    result = Digraph()
+
+    builders = [partial(node_get_dot, forest['forest'], root_id, True, result) for root_id in forest['roots']]
+
+    while builders:
+        builders_next = []
+
+        for builder in builders:
+            builders_sub, result = builder()
+
+            builders_next = chain(builders_next, builders_sub)
+
+        builders = builders_next
+
+    return result
+
 def forest_query_neighbourhood(query, forest, threshold=0, n_jobs=1):
     if n_jobs == 1:
         return chain.from_iterable(query_neighbourhood(root_id, forest['forest'], query, threshold)
@@ -87,6 +104,25 @@ def node_build(points, point_ids, node_id, leaf_max=5):
                                 leaf_max))
 
     return (node_id, node), children
+
+def node_get_dot(forest, node_id, is_root, dot):
+    children = []
+
+    if is_root:
+        dot.node(node_id, '')
+
+    if forest[node_id]['type'] == 'branch':
+        for child_id in forest[node_id]['children']:
+            if forest[child_id]['type'] == 'branch':
+                dot.node(child_id, '')
+            else:
+                dot.node(child_id, str(forest[child_id]['count']))
+
+            dot.edge(node_id, child_id)
+
+            children.append(partial(node_get_dot, forest, child_id, False, dot))
+
+    return children, dot
 
 def plane_normal(alpha, beta, dimension):
     return tuple(alpha.get(i, 0) - beta.get(i, 0) for i in range(dimension))
@@ -227,39 +263,3 @@ def tree_build(points, leaf_max=5):
         builders = builders_next
 
     return root_id, result
-
-def node_get_dot(forest, node_id, is_root, dot):
-    children = []
-
-    if is_root:
-        dot.node(node_id, '')
-
-    if forest[node_id]['type'] == 'branch':
-        for child_id in forest[node_id]['children']:
-            if forest[child_id]['type'] == 'branch':
-                dot.node(child_id, '')
-            else:
-                dot.node(child_id, str(forest[child_id]['count']))
-
-            dot.edge(node_id, child_id)
-
-            children.append(partial(node_get_dot, forest, child_id, False, dot))
-
-    return children, dot
-
-def forest_get_dot(forest, count=1):
-    result = Digraph()
-
-    builders = [partial(node_get_dot, forest['forest'], root_id, True, result) for root_id in forest['roots']]
-
-    while builders:
-        builders_next = []
-
-        for builder in builders:
-            builders_sub, result = builder()
-
-            builders_next = chain(builders_next, builders_sub)
-
-        builders = builders_next
-
-    return result
