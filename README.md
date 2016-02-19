@@ -51,7 +51,7 @@ idx, distance = search(query, points, pmeta, forest, fmeta, 1)[0]
 * `ptype`: points are either `list` (a list of numeric values), or `gensim` for gensim-like corpus
 * Returns: point recognized by lann
 
-### forest_build(points, tree_count, leaf_max=5, n_jobs=1, batch_size)
+### forest_build(points, tree_count, leaf_max=5, n_jobs=1, batch_size=10000)
 
 * `points`: output of `points_add`
 * `tree_count`: number of trees to build
