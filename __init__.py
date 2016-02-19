@@ -9,50 +9,77 @@ import logging
 
 from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor
 
+def batch_build(builders):
+    return [builder() for builder in builders]
+
 def distance_euclidean(alpha, beta, dimension):
     return sqrt(sum(pow(alpha.get(i, 0) - beta.get(i, 0), 2) for i in range(dimension)))
 
-def forest_build(points, pmeta, tree_count, leaf_max=5, n_jobs=1):
+def forest_build(points, pmeta, tree_count, leaf_max=5, n_jobs=1, batch_size=10000):
     forest = {}
 
     meta = {'count': tree_count,
             'leaf_max': leaf_max,
             'roots': [str(uuid4()) for _ in range(tree_count)]}
 
+    builders = [partial(node_build, points, pmeta, list(points.keys()), root_id, leaf_max)
+                for root_id
+                in meta['roots']]
+
     if n_jobs == 1:
-        forest_total, progress = len(points) * tree_count, 0
-
-        builders = [partial(node_build, points, pmeta, list(points.keys()), root_id, leaf_max)
-                    for root_id
-                    in meta['roots']]
-
-        while builders:
-            builders_next = []
-
-            for builder in builders:
-                node, builders_sub = builder()
-
-                if node['type'] == 'leaf':
-                    progress += node['count']
-                    (progress % 10000 == 0 or progress == forest_total) \
-                        and logging.info('Forest Progress {: >6.2f}%'.format(progress / forest_total * 100))
-
-                forest[node['id']] = node
-                builders_next.append(builders_sub)
-
-            builders = list(chain.from_iterable(builders_next))
+        forest = forest_build_single(builders, len(points) * tree_count)
     else:
-        # otherwise, build one tree after another
-        with ProcessPoolExecutor(max_workers=n_jobs) as pool:
-            forest = reduce(lambda result, tree: dict(result, **tree),
-                            pool.map(partial(tree_build,
-                                             points=points,
-                                             pmeta=pmeta,
-                                             leaf_max=leaf_max),
-                                     meta['roots']),
-                            {})
+        forest = forest_build_multi(builders, len(points) * tree_count, n_jobs, batch_size)
 
     return meta, forest
+
+def forest_build_multi(builders, forest_total, n_jobs, batch_size):
+    forest, progress = {}, 0
+
+    with ProcessPoolExecutor(max_workers=n_jobs) as pool:
+        while builders:
+            jobs, builders_next = [], []
+
+            for idx in range(0, len(builders), batch_size):
+                jobs.append(pool.submit(batch_build, builders[idx:idx+batch_size]))
+
+            for job in jobs:
+                for node, builders_sub in job.result():
+                    if node['type'] == 'leaf':
+                        progress += node['count']
+                        (progress % 5000 == 0 or progress == forest_total) \
+                        and logging.info('Forest Progress {: >6.2f}% ({}/{})'.format(
+                            progress / forest_total * 100,
+                            progress,
+                            forest_total))
+
+                    forest[node['id']] = node
+                    builders_next.append(builders_sub)
+
+            builders = list(chain.from_iterable(builders_next))
+
+        return forest
+
+def forest_build_single(builders, forest_total):
+    forest, progress = {}, 0
+
+    while builders:
+        builders_next = []
+
+        for builder in builders:
+            node, builders_sub = builder()
+
+            if node['type'] == 'leaf':
+                progress += node['count']
+                (progress % 10000 == 0 or progress == forest_total) \
+                    and logging.info('Forest Progress {: >6.2f}%'.format(progress / forest_total * 100))
+
+            forest[node['id']] = node
+            builders_next.append(builders_sub)
+
+        builders = list(chain.from_iterable(builders_next))
+
+    return forest
 
 def forest_get_dot(forest, count=1):
     result = Digraph()
