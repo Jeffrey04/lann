@@ -4,7 +4,7 @@ from uuid import uuid4
 from itertools import chain
 from functools import reduce, partial
 from operator import sub
-#from graphviz import Digraph
+from graphviz import Digraph
 
 from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor
 
