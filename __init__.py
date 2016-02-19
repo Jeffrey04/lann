@@ -15,7 +15,7 @@ def batch_build(builders):
 def distance_euclidean(alpha, beta, dimension):
     return sqrt(sum(pow(alpha.get(i, 0) - beta.get(i, 0), 2) for i in range(dimension)))
 
-def forest_build(points, pmeta, tree_count, leaf_max=5, n_jobs=1, batch_size=10000):
+def forest_build(points, pmeta, tree_count, leaf_max=5, n_jobs=1, batch_size=1000):
     forest = {}
 
     meta = {'count': tree_count,
@@ -41,10 +41,13 @@ def forest_build_multi(builders, forest_total, n_jobs, batch_size):
             jobs, builders_next = [], []
 
             for idx in range(0, len(builders), batch_size):
+                logging.info('submitting')
                 jobs.append(pool.submit(batch_build, builders[idx:idx+batch_size]))
 
             for job in jobs:
+                logging.info('waiting')
                 for node, builders_sub in job.result():
+                    logging.info('appending {}'.format(node['type']))
                     if node['type'] == 'leaf':
                         progress.append(progress[-1] + node['count'])
 
@@ -298,28 +301,3 @@ def split_points(points, dimension):
     result = sample(points, 2)
 
     return result if reduce(lambda _result, incoming: _result or sub(*[result[i].get(i, 0) for i in range(2)]) != 0, range(dimension), False) else split_points(points)
-
-def tree_build(root_id, points, pmeta, leaf_max=5):
-    result, progress = {}, 0
-
-    if len(points) <= leaf_max:
-        raise Exception('Not enough points to generate tree')
-
-    builders = [partial(node_build, points, pmeta, points.keys(), root_id, leaf_max)]
-    while builders:
-        builders_next = []
-
-        for builder in builders:
-            node, builders_sub = builder()
-
-            builders_next.append(builders_sub)
-            result[node['id']] = node
-
-            if node['type'] == 'leaf':
-                progress += node['count']
-                (progress % 1000 == 0 or progress == len(points)) \
-                    and logging.info('Tree {} Progress {: >6.2f}%'.format(root_id, progress / len(points) * 100))
-
-        builders = list(chain.from_iterable(builders_next))
-
-    return result
