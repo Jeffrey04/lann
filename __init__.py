@@ -5,6 +5,7 @@ from itertools import chain
 from functools import reduce, partial
 from operator import sub
 from graphviz import Digraph
+import logging
 
 from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor
 
@@ -19,6 +20,8 @@ def forest_build(points, pmeta, tree_count, leaf_max=5, n_jobs=1):
             'roots': [str(uuid4()) for _ in range(tree_count)]}
 
     if n_jobs == 1:
+        forest_total, progress = len(points) * tree_count, 0
+
         builders = [partial(node_build, points, pmeta, list(points.keys()), root_id, leaf_max)
                     for root_id
                     in meta['roots']]
@@ -28,6 +31,11 @@ def forest_build(points, pmeta, tree_count, leaf_max=5, n_jobs=1):
 
             for builder in builders:
                 node, builders_sub = builder()
+
+                if node['type'] == 'leaf':
+                    progress += node['count']
+                    (progress % 10000 == 0 or progress == forest_total) \
+                        and logging.info('Forest Progress {: >6.2f}%'.format(progress / forest_total * 100))
 
                 forest[node['id']] = node
                 builders_next.append(builders_sub)
@@ -258,7 +266,7 @@ def split_points(points, dimension):
     return result if reduce(lambda _result, incoming: _result or sub(*[result[i].get(i, 0) for i in range(2)]) != 0, range(dimension), False) else split_points(points)
 
 def tree_build(root_id, points, pmeta, leaf_max=5):
-    result = {}
+    result, progress = {}, 0
 
     if len(points) <= leaf_max:
         raise Exception('Not enough points to generate tree')
@@ -272,6 +280,11 @@ def tree_build(root_id, points, pmeta, leaf_max=5):
 
             builders_next.append(builders_sub)
             result[node['id']] = node
+
+            if node['type'] == 'leaf':
+                progress += node['count']
+                (progress % 1000 == 0 or progress == len(points)) \
+                    and logging.info('Tree {} Progress {: >6.2f}%'.format(root_id, progress / len(points) * 100))
 
         builders = list(chain.from_iterable(builders_next))
 
