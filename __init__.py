@@ -1,5 +1,5 @@
 from random import sample
-from math import pow, sqrt
+from math import pow, sqrt, floor
 from uuid import uuid4
 from itertools import chain
 from functools import reduce, partial
@@ -34,7 +34,7 @@ def forest_build(points, pmeta, tree_count, leaf_max=5, n_jobs=1, batch_size=100
     return meta, forest
 
 def forest_build_multi(builders, forest_total, n_jobs, batch_size):
-    forest, progress = {}, 0
+    forest, progress = {}, [0]
 
     with ProcessPoolExecutor(max_workers=n_jobs) as pool:
         while builders:
@@ -46,12 +46,9 @@ def forest_build_multi(builders, forest_total, n_jobs, batch_size):
             for job in jobs:
                 for node, builders_sub in job.result():
                     if node['type'] == 'leaf':
-                        progress += node['count']
-                        (progress % 5000 == 0 or progress == forest_total) \
-                        and logging.info('Forest Progress {: >6.2f}% ({}/{})'.format(
-                            progress / forest_total * 100,
-                            progress,
-                            forest_total))
+                        progress.append(progress[-1] + node['count'])
+
+                        progress_log('Forest building progress', progress, forest_total)
 
                     forest[node['id']] = node
                     builders_next.append(builders_sub)
@@ -61,7 +58,7 @@ def forest_build_multi(builders, forest_total, n_jobs, batch_size):
         return forest
 
 def forest_build_single(builders, forest_total):
-    forest, progress = {}, 0
+    forest, progress = {}, [0]
 
     while builders:
         builders_next = []
@@ -70,9 +67,9 @@ def forest_build_single(builders, forest_total):
             node, builders_sub = builder()
 
             if node['type'] == 'leaf':
-                progress += node['count']
-                (progress % 10000 == 0 or progress == forest_total) \
-                    and logging.info('Forest Progress {: >6.2f}%'.format(progress / forest_total * 100))
+                progress.append(progress[-1] + node['count'])
+
+                progress_log('Forest building progress', progress, forest_total)
 
             forest[node['id']] = node
             builders_next.append(builders_sub)
@@ -236,6 +233,16 @@ def points_add(vectors, dimension, ptype, identifiers=None):
 
     return meta, points
 
+def progress_log(caption, progress, total):
+    to_print = False
+
+    if progress[-1] == total:
+        to_print = True
+    elif len(progress) > 1 and floor(progress[-2] / total * 10) < floor(progress[-1] / total * 10):
+        to_print = True
+
+    to_print and logging.info('{} {: >6.2f}%'.format(caption, progress[-1] / total * 100))
+
 def query_neighbourhood(start_id, forest, query, threshold=0):
     result = []
 
@@ -316,3 +323,45 @@ def tree_build(root_id, points, pmeta, leaf_max=5):
         builders = list(chain.from_iterable(builders_next))
 
     return result
+
+from uuid import uuid4
+from random import gauss
+from pprint import pprint
+from time import clock
+
+logging.basicConfig(level=logging.INFO)
+
+def brute_search(query, points, pmeta):
+    result = [(key, distance_euclidean(query, point, pmeta['dimension']))
+              for key, point
+              in points.items()]
+
+    return sorted(result, key=lambda _: _[-1])
+
+size, dim = 2000, 5
+
+print('generating points')
+pmeta, points = points_add([[gauss(0, 1) for __ in range(dim)] for _ in range(size)],
+                           dim,
+                           'list',
+                           [uuid4() for _ in range(size)])
+
+print('generating query')
+query = point_convert([gauss(0, 1) for _ in range(dim)], 'list')
+
+print('search brute')
+t0 = clock()
+bresult = brute_search(query, points, pmeta)
+print('took {} seconds'.format(clock() - t0))
+pprint(bresult[:10])
+
+print('generating forest')
+t0 = clock()
+fmeta, forest = forest_build(points, pmeta, 50, leaf_max=15, n_jobs=4)
+print('took {} seconds'.format(clock() - t0))
+
+print('search')
+t0 = clock()
+result = search(query, points, pmeta, forest, fmeta, 10)
+print('took {} seconds'.format(clock() - t0))
+pprint(result)
