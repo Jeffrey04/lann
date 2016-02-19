@@ -4,35 +4,47 @@ from uuid import uuid4
 from itertools import chain
 from functools import reduce, partial
 from operator import sub
-from graphviz import Digraph
+#from graphviz import Digraph
 
 from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor
 
 def distance_euclidean(alpha, beta, dimension):
     return sqrt(sum(pow(alpha.get(i, 0) - beta.get(i, 0), 2) for i in range(dimension)))
 
-def forest_build(points, tree_count, leaf_max=5, n_jobs=1):
-    result, roots, forest = {'count': tree_count, 'leaf_max': leaf_max}, [], {}
+def forest_build(points, pmeta, tree_count, leaf_max=5, n_jobs=1):
+    forest = {}
+
+    meta = {'count': tree_count,
+            'leaf_max': leaf_max,
+            'roots': [str(uuid4()) for _ in range(tree_count)]}
 
     if n_jobs == 1:
-        for root_id, tree in (tree_build(points, leaf_max) for _ in range(tree_count)):
-            roots.append(root_id)
-            forest = dict(forest, **tree)
+        builders = [partial(node_build, points, pmeta, list(points.keys()), root_id, leaf_max)
+                    for root_id
+                    in meta['roots']]
 
-        return dict(result, forest=forest, roots=roots)
+        while builders:
+            builders_next = []
+
+            for builder in builders:
+                node, builders_sub = builder()
+
+                forest[node['id']] = node
+                builders_next.append(builders_sub)
+
+            builders = list(chain.from_iterable(builders_next))
     else:
+        # otherwise, build one tree after another
         with ProcessPoolExecutor(max_workers=n_jobs) as pool:
-            jobs = []
-            for _ in range(tree_count):
-                jobs.append(pool.submit(tree_build,
-                                        points,
-                                        leaf_max))
+            forest = reduce(lambda result, tree: dict(result, **tree),
+                            pool.map(partial(tree_build,
+                                             points=points,
+                                             pmeta=pmeta,
+                                             leaf_max=leaf_max),
+                                     meta['roots']),
+                            {})
 
-            for root_id, tree in (job.result() for job in jobs):
-                roots.append(root_id)
-                forest = dict(forest, **tree)
-
-            return dict(result, forest=forest, roots=roots)
+    return meta, forest
 
 def forest_get_dot(forest, count=1):
     result = Digraph()
@@ -51,17 +63,17 @@ def forest_get_dot(forest, count=1):
 
     return result
 
-def forest_query_neighbourhood(query, forest, threshold=0, n_jobs=1):
+def forest_query_neighbourhood(query, forest, fmeta, threshold=0, n_jobs=1):
     if n_jobs == 1:
-        return chain.from_iterable(query_neighbourhood(root_id, forest['forest'], query, threshold)
-                                   for root_id in forest['roots'])
+        return chain.from_iterable(query_neighbourhood(root_id, forest, query, threshold)
+                                   for root_id in fmeta['roots'])
     else:
         with ThreadPoolExecutor(max_workers=n_jobs) as pool:
             return chain.from_iterable(
-                pool.map(partial(query_neighbourhood, forest=forest['forest'], query=query, threshold=threshold),
-                         forest['roots']))
+                pool.map(partial(query_neighbourhood, forest=forest, query=query, threshold=threshold),
+                         fmeta['roots']))
 
-def node_build(points, point_ids, node_id, leaf_max=5):
+def node_build(points, pmeta, point_ids, node_id, leaf_max=5):
     node, children = {}, []
 
     if len(point_ids) <= leaf_max:
@@ -72,17 +84,17 @@ def node_build(points, point_ids, node_id, leaf_max=5):
             'children': point_ids
         }
     else:
-        split = split_points([points['points'][idx] for idx in point_ids],
-                             points['dimension'])
+        split = split_points([points[idx] for idx in point_ids],
+                             pmeta['dimension'])
         distance_calc = plane_point_distance_calculator(
-            plane_normal(*split, points['dimension']),
-            plane_point(*split, points['dimension']),
-            points['dimension'])
+            plane_normal(*split, dimension=pmeta['dimension']),
+            plane_point(*split, dimension=pmeta['dimension']),
+            pmeta['dimension'])
         branches = {False: [], True: []}
         child_ids = {False: str(uuid4()), True: str(uuid4())}
 
         for idx in point_ids:
-            branches[distance_calc(points['points'][idx]) > 0].append(idx)
+            branches[distance_calc(points[idx]) > 0].append(idx)
 
         node = {
             'type': 'branch',
@@ -94,16 +106,18 @@ def node_build(points, point_ids, node_id, leaf_max=5):
 
         children.append(partial(node_build,
                                 points,
+                                pmeta,
                                 branches[False],
                                 child_ids[False],
                                 leaf_max))
         children.append(partial(node_build,
                                 points,
+                                pmeta,
                                 branches[True],
                                 child_ids[True],
                                 leaf_max))
 
-    return (node_id, node), children
+    return node, children
 
 def node_get_dot(forest, node_id, is_root, dot):
     children = []
@@ -165,29 +179,27 @@ def point_convert_invalid(*_):
     raise Exception('Not supported')
 
 def points_add(vectors, dimension, ptype, identifiers=None):
-    result = {
-        'dimension': dimension,
-        'points': []
-    }
+    meta = {'dimension': dimension}
+    points = {}
 
     if identifiers:
-        result['points'] = reduce(lambda result, i: point_add(identifiers[i],
-                                                              vectors[i],
-                                                              dimension,
-                                                              ptype,
-                                                              result),
-                                  range(len(identifiers)),
-                                  {})
+        points = reduce(lambda result, i: point_add(identifiers[i],
+                                                    vectors[i],
+                                                    dimension,
+                                                    ptype,
+                                                    result),
+                        range(len(identifiers)),
+                        {})
     else:
-        result['points'] = reduce(lambda result, vector: point_add(uuid4(),
-                                                                   vector,
-                                                                   dimension,
-                                                                   ptype,
-                                                                   result),
-                                  vectors,
-                                  {})
+        points = reduce(lambda result, vector: point_add(uuid4(),
+                                                         vector,
+                                                         dimension,
+                                                         ptype,
+                                                         result),
+                        vectors,
+                        {})
 
-    return result
+    return meta, points
 
 def query_neighbourhood(start_id, forest, query, threshold=0):
     result = []
@@ -222,17 +234,18 @@ def query_neighbourhood(start_id, forest, query, threshold=0):
     return result
 
 
-def search(query, points, forest, n=1, threshold=None, n_jobs=1):
+def search(query, points, pmeta, forest, fmeta, n=1, threshold=None, n_jobs=1):
     neighbourhood = forest_query_neighbourhood(query,
                                                forest,
-                                               threshold if threshold else (points['dimension'] * 2e-2),
+                                               fmeta,
+                                               threshold if threshold else (pmeta['dimension'] * 2e-2),
                                                n_jobs)
 
-    result, candidate_max = {}, max(n, forest['leaf_max']) * forest['count']
+    result, candidate_max = {}, max(n, fmeta['leaf_max']) * fmeta['count']
 
     for idx in chain.from_iterable(leaf['children'] for _, leaf in sorted(neighbourhood, key=lambda _: _[0])):
         if idx not in result:
-            result[idx] = distance_euclidean(query, points['points'][idx], points['dimension'])
+            result[idx] = distance_euclidean(query, points[idx], pmeta['dimension'])
 
             if len(result) >= candidate_max:
                 break
@@ -244,22 +257,22 @@ def split_points(points, dimension):
 
     return result if reduce(lambda _result, incoming: _result or sub(*[result[i].get(i, 0) for i in range(2)]) != 0, range(dimension), False) else split_points(points)
 
-def tree_build(points, leaf_max=5):
-    root_id, result = str(uuid4()), {}
+def tree_build(root_id, points, pmeta, leaf_max=5):
+    result = {}
 
-    if len(points['points']) <= leaf_max:
+    if len(points) <= leaf_max:
         raise Exception('Not enough points to generate tree')
 
-    builders = [partial(node_build, points, points['points'].keys(), root_id, leaf_max)]
+    builders = [partial(node_build, points, pmeta, points.keys(), root_id, leaf_max)]
     while builders:
         builders_next = []
 
         for builder in builders:
-            (node_id, node), builders_sub = builder()
+            node, builders_sub = builder()
 
-            builders_next = chain.from_iterable([builders_next, builders_sub])
-            result[node_id] = node
+            builders_next.append(builders_sub)
+            result[node['id']] = node
 
-        builders = builders_next
+        builders = list(chain.from_iterable(builders_next))
 
-    return root_id, result
+    return result
