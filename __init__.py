@@ -306,39 +306,6 @@ def progress_log(caption, progress, total):
 def query_get_distance(query, forest, multiplier, node_id):
     return (forest[node_id]['func'](query), multiplier, node_id)
 
-def query_neighbourhood(start_id, forest, query, threshold=0):
-    result = []
-
-    branch_ids = [(1., start_id)]
-
-    while branch_ids:
-        branches_next = []
-
-        for multiplier, branch_id in branch_ids:
-            if forest[branch_id]['type'] == 'leaf':
-                result.append((1 - multiplier, forest[branch_id]))
-            else:
-                delta = forest[branch_id]['func'](query)
-
-                if threshold > 0 and delta > 0 and delta <= threshold:
-                    branches_next.append((multiplier * 0.9,
-                                          forest[branch_id]['children'][False]))
-                    branches_next.append((multiplier * 1.,
-                                          forest[branch_id]['children'][True]))
-                elif threshold > 0 and delta <= 0 and -threshold <= delta:
-                    branches_next.append((multiplier * 1.,
-                                          forest[branch_id]['children'][False]))
-                    branches_next.append((multiplier * 0.9,
-                                          forest[branch_id]['children'][True]))
-                else:
-                    branches_next.append((multiplier * 1.,
-                                          forest[branch_id]['children'][delta > 0]))
-
-            branch_ids = branches_next
-
-    return result
-
-
 def search(query, points, pmeta, forest, fmeta, n=1, threshold=None, n_jobs=1):
     neighbourhood = forest_query_neighbourhood(query,
                                                forest,
