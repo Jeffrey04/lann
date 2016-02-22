@@ -41,13 +41,10 @@ def forest_build_multi(builders, forest_total, n_jobs, batch_size):
             jobs, builders_next = [], []
 
             for idx in range(0, len(builders), batch_size):
-                logging.info('submitting')
                 jobs.append(pool.submit(batch_build, builders[idx:idx+batch_size]))
 
             for job in jobs:
-                logging.info('waiting')
                 for node, builders_sub in job.result():
-                    logging.info('appending {}'.format(node['type']))
                     if node['type'] == 'leaf':
                         progress.append(progress[-1] + node['count'])
 
