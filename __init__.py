@@ -101,67 +101,9 @@ def forest_query_neighbourhood(query, forest, fmeta, threshold, n_jobs):
     nodes = [(1., root_id) for root_id in fmeta['roots']]
 
     if n_jobs == 1:
-        while nodes:
-            nodes_next = []
-
-            for multiplier, node_id in nodes:
-                if forest[node_id]['type'] == 'leaf':
-                    result.append((1 - multiplier, forest[node_id]))
-                else:
-                    delta = forest[node_id]['func'](query)
-
-                    if threshold > 0 and delta > 0 and delta <= threshold:
-                        nodes_next.append((multiplier * 0.9,
-                                           forest[node_id]['children'][False]))
-                        nodes_next.append((multiplier * 1.,
-                                           forest[node_id]['children'][True]))
-                    elif threshold > 0 and delta <= 0 and -threshold <= delta:
-                        nodes_next.append((multiplier * 1.,
-                                           forest[node_id]['children'][False]))
-                        nodes_next.append((multiplier * 0.9,
-                                           forest[node_id]['children'][True]))
-                    else:
-                        nodes_next.append((multiplier * 1.,
-                                           forest[node_id]['children'][delta > 0]))
-
-            nodes = nodes_next
+        result = query_neighbourhood_single(nodes, forest, threshold)
     else:
-        with ThreadPoolExecutor(max_workers=n_jobs) as pool:
-            while nodes:
-                nodes_next, jobs = [], []
-
-                for idx in range(0, len(nodes), 1000):
-                    _job = []
-
-                    for multiplier, node_id in nodes[idx:1000]:
-                        if forest[node_id]['type'] == 'leaf':
-                            result.append((1 - multiplier, forest[node_id]))
-                        else:
-                            _job.append(partial(query_get_distance,
-                                                query,
-                                                forest,
-                                                multiplier,
-                                                node_id))
-
-                    jobs.append(pool.submit(batch_build, _job))
-
-                for job in jobs:
-                    for delta, multiplier, node_id in job.result():
-                        if threshold > 0 and delta > 0 and delta <= threshold:
-                            nodes_next.append((multiplier * 0.9,
-                                               forest[node_id]['children'][False]))
-                            nodes_next.append((multiplier * 1.,
-                                               forest[node_id]['children'][True]))
-                        elif threshold > 0 and delta <= 0 and -threshold <= delta:
-                            nodes_next.append((multiplier * 1.,
-                                               forest[node_id]['children'][False]))
-                            nodes_next.append((multiplier * 0.9,
-                                               forest[node_id]['children'][True]))
-                        else:
-                            nodes_next.append((multiplier * 1.,
-                                               forest[node_id]['children'][delta > 0]))
-
-                nodes = nodes_next
+        result = query_neighbourhood_multi(nodes, forest, threshold, n_jobs)
 
     return result
 
@@ -303,8 +245,84 @@ def progress_log(caption, progress, total):
 
     to_print and logging.info('{} {: >6.2f}%'.format(caption, progress[-1] / total * 100))
 
-def query_get_distance(query, forest, multiplier, node_id):
-    return (forest[node_id]['func'](query), multiplier, node_id)
+def query_get_children(query, forest, threshold, multiplier, node_id):
+    result, delta = [], forest[node_id]['func'](query)
+
+    if threshold > 0 and delta > 0 and delta <= threshold:
+        result.append((multiplier * 0.9,
+                       forest[node_id]['children'][False]))
+        result.append((multiplier * 1.,
+                       forest[node_id]['children'][True]))
+    elif threshold > 0 and delta <= 0 and -threshold <= delta:
+        result.append((multiplier * 1.,
+                       forest[node_id]['children'][False]))
+        result.append((multiplier * 0.9,
+                       forest[node_id]['children'][True]))
+    else:
+        result.append((multiplier * 1.,
+                       forest[node_id]['children'][delta > 0]))
+
+    return result
+
+def query_neighbourhood_multi(nodes, forest, threshold, n_jobs):
+    result = []
+
+    with ThreadPoolExecutor(max_workers=n_jobs) as pool:
+        while nodes:
+            nodes_next, jobs = [], []
+
+            for idx in range(0, len(nodes), 1000):
+                _job = []
+
+                for multiplier, node_id in nodes[idx:1000]:
+                    if forest[node_id]['type'] == 'leaf':
+                        result.append((1 - multiplier, forest[node_id]))
+                    else:
+                        _job.append(partial(query_get_children,
+                                            query,
+                                            forest,
+                                            threshold,
+                                            multiplier,
+                                            node_id))
+
+                jobs.append(pool.submit(batch_build, _job))
+
+            for job in jobs:
+                nodes_next.append(chain.from_iterable(job.result()))
+
+            nodes = list(chain.from_iterable(nodes_next))
+
+        return result
+
+def query_neighbourhood_single(nodes, forest, threshold):
+    result = []
+
+    while nodes:
+        nodes_next = []
+
+        for multiplier, node_id in nodes:
+            if forest[node_id]['type'] == 'leaf':
+                result.append((1 - multiplier, forest[node_id]))
+            else:
+                delta = forest[node_id]['func'](query)
+
+                if threshold > 0 and delta > 0 and delta <= threshold:
+                    nodes_next.append((multiplier * 0.9,
+                                       forest[node_id]['children'][False]))
+                    nodes_next.append((multiplier * 1.,
+                                       forest[node_id]['children'][True]))
+                elif threshold > 0 and delta <= 0 and -threshold <= delta:
+                    nodes_next.append((multiplier * 1.,
+                                       forest[node_id]['children'][False]))
+                    nodes_next.append((multiplier * 0.9,
+                                       forest[node_id]['children'][True]))
+                else:
+                    nodes_next.append((multiplier * 1.,
+                                       forest[node_id]['children'][delta > 0]))
+
+        nodes = nodes_next
+
+    return result
 
 def search(query, points, pmeta, forest, fmeta, n=1, threshold=None, n_jobs=1):
     neighbourhood = forest_query_neighbourhood(query,
