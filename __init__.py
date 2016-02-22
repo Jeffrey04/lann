@@ -245,8 +245,24 @@ def progress_log(caption, progress, total):
 
     to_print and logging.info('{} {: >6.2f}%'.format(caption, progress[-1] / total * 100))
 
-def query_get_distance(query, forest, multiplier, node_id):
-    return (forest[node_id]['func'](query), multiplier, node_id)
+def query_get_children(query, forest, threshold, multiplier, node_id):
+    result, delta = [], forest[node_id]['func'](query)
+
+    if threshold > 0 and delta > 0 and delta <= threshold:
+        result.append((multiplier * 0.9,
+                       forest[node_id]['children'][False]))
+        result.append((multiplier * 1.,
+                       forest[node_id]['children'][True]))
+    elif threshold > 0 and delta <= 0 and -threshold <= delta:
+        result.append((multiplier * 1.,
+                       forest[node_id]['children'][False]))
+        result.append((multiplier * 0.9,
+                       forest[node_id]['children'][True]))
+    else:
+        result.append((multiplier * 1.,
+                       forest[node_id]['children'][delta > 0]))
+
+    return result
 
 def query_neighbourhood_multi(nodes, forest, threshold, n_jobs):
     result = []
@@ -262,31 +278,19 @@ def query_neighbourhood_multi(nodes, forest, threshold, n_jobs):
                     if forest[node_id]['type'] == 'leaf':
                         result.append((1 - multiplier, forest[node_id]))
                     else:
-                        _job.append(partial(query_get_distance,
+                        _job.append(partial(query_get_children,
                                             query,
                                             forest,
+                                            threshold,
                                             multiplier,
                                             node_id))
 
                 jobs.append(pool.submit(batch_build, _job))
 
             for job in jobs:
-                for delta, multiplier, node_id in job.result():
-                    if threshold > 0 and delta > 0 and delta <= threshold:
-                        nodes_next.append((multiplier * 0.9,
-                                           forest[node_id]['children'][False]))
-                        nodes_next.append((multiplier * 1.,
-                                           forest[node_id]['children'][True]))
-                    elif threshold > 0 and delta <= 0 and -threshold <= delta:
-                        nodes_next.append((multiplier * 1.,
-                                           forest[node_id]['children'][False]))
-                        nodes_next.append((multiplier * 0.9,
-                                           forest[node_id]['children'][True]))
-                    else:
-                        nodes_next.append((multiplier * 1.,
-                                           forest[node_id]['children'][delta > 0]))
+                nodes_next.append(chain.from_iterable(job.result()))
 
-            nodes = nodes_next
+            nodes = list(chain.from_iterable(nodes_next))
 
         return result
 
@@ -342,51 +346,3 @@ def split_points(points, dimension):
     result = sample(points, 2)
 
     return result if reduce(lambda _result, incoming: _result or sub(*[result[i].get(i, 0) for i in range(2)]) != 0, range(dimension), False) else split_points(points)
-
-from uuid import uuid4
-from random import gauss
-from pprint import pprint
-from timeit import default_timer
-
-logging.basicConfig(level=logging.INFO)
-
-def brute_search(query, points, pmeta):
-    result = [(key, distance_euclidean(query, point, pmeta['dimension']))
-              for key, point
-              in points.items()]
-
-    return sorted(result, key=lambda _: _[-1])
-
-size, dim = 500, 2
-
-print('generating points')
-pmeta, points = points_add([[gauss(0, 1) for __ in range(dim)] for _ in range(size)],
-                           dim,
-                           'list',
-                           [uuid4() for _ in range(size)])
-
-print('generating query')
-query = point_convert([gauss(0, 1) for _ in range(dim)], 'list')
-
-print('search brute')
-t0 = default_timer()
-bresult = brute_search(query, points, pmeta)
-print('took {} seconds'.format(default_timer() - t0))
-pprint(bresult[:10])
-
-print('generating forest')
-t0 = default_timer()
-fmeta, forest = forest_build(points, pmeta, 20, leaf_max=25, n_jobs=4)
-print('took {} seconds'.format(default_timer() - t0))
-
-print('search')
-t0 = default_timer()
-result = search(query, points, pmeta, forest, fmeta, 10)
-print('took {} seconds'.format(default_timer() - t0))
-pprint(result)
-
-print('search')
-t0 = default_timer()
-result = search(query, points, pmeta, forest, fmeta, 10, n_jobs=20)
-print('took {} seconds'.format(default_timer() - t0))
-pprint(result)
