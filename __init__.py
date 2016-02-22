@@ -12,19 +12,39 @@ from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor
 def batch_build(builders):
     return [builder() for builder in builders]
 
+def batch_get_sequence(total, leaf_max):
+    batches, batch_size = [], leaf_max * 30
+
+    for idx in range(0, total, batch_size):
+        if batch_size < (total - idx):
+            batches.append(idx)
+
+    batches.append(total)
+
+    return reduce(lambda result, idx: result + [(batches[idx], batches[idx + 1])],
+                  range(len(batches) - 1),
+                  []) if len(batches) > 1 else [(0, total)]
+
+def batch_group_keys(sequence, keys, tree_count):
+    return list(chain.from_iterable([(uuid4(), keys[start:end]) for start, end in sequence] for _ in range(tree_count)))
+
 def distance_euclidean(alpha, beta, dimension):
     return sqrt(sum(pow(alpha.get(i, 0) - beta.get(i, 0), 2) for i in range(dimension)))
 
 def forest_build(points, pmeta, tree_count, leaf_max=5, n_jobs=1, batch_size=1000):
     forest = {}
 
+    batches = batch_group_keys(batch_get_sequence(len(points), leaf_max),
+                               list(points.keys()),
+                               tree_count)
+
     meta = {'count': tree_count,
             'leaf_max': leaf_max,
-            'roots': [str(uuid4()) for _ in range(tree_count)]}
+            'roots': list(zip(*batches))[0]}
 
-    builders = [partial(node_build, points, pmeta, list(points.keys()), root_id, leaf_max)
-                for root_id
-                in meta['roots']]
+    builders = [partial(node_build, points, pmeta, keys, root_id, leaf_max)
+                for root_id, keys
+                in batches]
 
     if n_jobs == 1:
         forest = forest_build_single(builders, len(points) * tree_count)
