@@ -1,5 +1,5 @@
 from random import sample
-from math import pow, sqrt, floor
+from math import pow, sqrt, floor, ceil
 from uuid import uuid4
 from itertools import chain
 from functools import reduce, partial
@@ -12,19 +12,34 @@ from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor
 def batch_build(builders):
     return [builder() for builder in builders]
 
+def batch_get_sequence(total, leaf_max):
+    batches, batch_size = [], ceil(total / floor(total / (leaf_max * 100)))
+
+    for idx in range(0, total, batch_size):
+        batches.append((idx, min(idx + batch_size, total)))
+
+    return batches
+
+def batch_group_keys(sequence, keys, tree_count):
+    return list(chain.from_iterable([(str(uuid4()), keys[start:end]) for start, end in sequence] for _ in range(tree_count)))
+
 def distance_euclidean(alpha, beta, dimension):
     return sqrt(sum(pow(alpha.get(i, 0) - beta.get(i, 0), 2) for i in range(dimension)))
 
 def forest_build(points, pmeta, tree_count, leaf_max=5, n_jobs=1, batch_size=1000):
     forest = {}
 
+    batches = batch_group_keys(batch_get_sequence(len(points), leaf_max),
+                               list(points.keys()),
+                               tree_count)
+
     meta = {'count': tree_count,
             'leaf_max': leaf_max,
-            'roots': [str(uuid4()) for _ in range(tree_count)]}
+            'roots': list(zip(*batches))[0]}
 
-    builders = [partial(node_build, points, pmeta, list(points.keys()), root_id, leaf_max)
-                for root_id
-                in meta['roots']]
+    builders = [partial(node_build, points, pmeta, keys, root_id, leaf_max)
+                for root_id, keys
+                in batches]
 
     if n_jobs == 1:
         forest = forest_build_single(builders, len(points) * tree_count)
@@ -78,10 +93,13 @@ def forest_build_single(builders, forest_total):
 
     return forest
 
-def forest_get_dot(forest, count=1):
+def forest_get_dot(forest, fmeta, count=1):
     result = Digraph()
 
-    builders = [partial(node_get_dot, forest['forest'], root_id, True, result) for root_id in forest['roots']]
+    for root_id in fmeta['roots']:
+        result.edge('0', str(root_id))
+
+    builders = [partial(node_get_dot, forest, root_id, True, result) for root_id in fmeta['roots']]
 
     while builders:
         builders_next = []
