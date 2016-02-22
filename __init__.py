@@ -21,7 +21,7 @@ def batch_get_sequence(total, leaf_max):
     return batches
 
 def batch_group_keys(sequence, keys, tree_count):
-    return list(chain.from_iterable([(uuid4(), keys[start:end]) for start, end in sequence] for _ in range(tree_count)))
+    return list(chain.from_iterable([(str(uuid4()), keys[start:end]) for start, end in sequence] for _ in range(tree_count)))
 
 def distance_euclidean(alpha, beta, dimension):
     return sqrt(sum(pow(alpha.get(i, 0) - beta.get(i, 0), 2) for i in range(dimension)))
@@ -93,10 +93,13 @@ def forest_build_single(builders, forest_total):
 
     return forest
 
-def forest_get_dot(forest, count=1):
+def forest_get_dot(forest, fmeta, count=1):
     result = Digraph()
 
-    builders = [partial(node_get_dot, forest['forest'], root_id, True, result) for root_id in forest['roots']]
+    for root_id in fmeta['roots']:
+        result.edge('0', str(root_id))
+
+    builders = [partial(node_get_dot, forest, root_id, True, result) for root_id in fmeta['roots']]
 
     while builders:
         builders_next = []
