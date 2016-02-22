@@ -1,5 +1,5 @@
 from random import sample
-from math import pow, sqrt, floor
+from math import pow, sqrt, floor, ceil
 from uuid import uuid4
 from itertools import chain
 from functools import reduce, partial
@@ -13,17 +13,12 @@ def batch_build(builders):
     return [builder() for builder in builders]
 
 def batch_get_sequence(total, leaf_max):
-    batches, batch_size = [], leaf_max * 30
+    batches, batch_size = [], ceil(total / floor(total / (leaf_max * 100)))
 
     for idx in range(0, total, batch_size):
-        if batch_size < (total - idx):
-            batches.append(idx)
+        batches.append((idx, min(idx + batch_size, total)))
 
-    batches.append(total)
-
-    return reduce(lambda result, idx: result + [(batches[idx], batches[idx + 1])],
-                  range(len(batches) - 1),
-                  []) if len(batches) > 1 else [(0, total)]
+    return batches
 
 def batch_group_keys(sequence, keys, tree_count):
     return list(chain.from_iterable([(uuid4(), keys[start:end]) for start, end in sequence] for _ in range(tree_count)))
