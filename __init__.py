@@ -6,6 +6,8 @@ from functools import reduce, partial
 from operator import sub
 from graphviz import Digraph
 import logging
+import lmdb
+import pickle
 
 from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor
 
@@ -208,8 +210,8 @@ def plane_point_distance_calculator(normal, point, dimension):
 def _ppd_calculator(point, normal, d, dimension):
     return ((sum([point.get(i, 0) * normal[i] for i in range(dimension)]) + d) / sqrt(sum([pow(i, 2) for i in normal])))
 
-def point_add(id, vector, dimension, ptype, result={}):
-    result[id] = point_convert(vector, ptype)
+def point_add(id, vector, dimension, ptype, result):
+    result[id] = pickle.dumps(point_convert(vector, ptype))
 
     return result
 
@@ -230,28 +232,21 @@ def point_convert_list(vector):
 def point_convert_invalid(*_):
     raise Exception('Not supported')
 
-def points_add(vectors, dimension, ptype, identifiers=None):
+def points_add(vectors, filename, dimension, ptype, identifiers=None):
     meta = {'dimension': dimension}
-    points = {}
+    env = lmdb.open(filename)
 
-    if identifiers:
-        points = reduce(lambda result, i: point_add(identifiers[i],
-                                                    vectors[i],
-                                                    dimension,
-                                                    ptype,
-                                                    result),
-                        range(len(identifiers)),
-                        {})
-    else:
-        points = reduce(lambda result, vector: point_add(uuid4(),
-                                                         vector,
-                                                         dimension,
-                                                         ptype,
-                                                         result),
-                        vectors,
-                        {})
+    with env.begin(write=True) as txn:
+        if identifiers is None:
+            identifiers = (str(uuid4()) for _ in range(len(vectors)))
+        else:
+            identifiers = iter(identifiers)
 
-    return meta, points
+        for vector in vectors:
+            txn.put(next(identifiers).encode('ascii'),
+                    pickle.dumps(point_convert(vector, ptype)))
+
+    return meta, env
 
 def progress_log(caption, progress, total):
     to_print = False
@@ -364,3 +359,19 @@ def split_points(points, dimension):
     result = sample(points, 2)
 
     return result if reduce(lambda _result, incoming: _result or sub(*[result[i].get(i, 0) for i in range(2)]) != 0, range(dimension), False) else split_points(points)
+
+from uuid import uuid4
+from random import gauss
+from pprint import pprint
+from timeit import default_timer
+from shutil import rmtree
+
+logging.basicConfig(level=logging.INFO)
+
+def brute_search(query, points, pmeta):
+    with points.begin() as txn:
+        result = [(key, distance_euclidean(query, pickle.loads(value), pmeta['dimension']))
+                  for key, value
+                  in txn.cursor()]
+
+    return sorted(result, key=lambda _: _[-1])
