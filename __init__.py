@@ -179,18 +179,21 @@ def node_get_dot(forest, node_id, is_root, dot):
     if is_root:
         dot.node(node_id, '')
 
-    if forest[node_id]['type'] == 'branch':
-        for child_id in forest[node_id]['children']:
-            if forest[child_id]['type'] == 'branch':
-                dot.node(child_id, '')
-            else:
-                dot.node(child_id, str(forest[child_id]['count']))
+    with forest.begin() as txn:
+        node = pickle.loads(txn.get(node_id.encode('ascii')))
 
-            dot.edge(node_id, child_id)
+        if node['type'] == 'branch':
+            for child_id in node['children']:
+                if node['type'] == 'branch':
+                    dot.node(child_id, '')
+                else:
+                    dot.node(child_id, str(node['count']))
 
-            children.append(partial(node_get_dot, forest, child_id, False, dot))
+                dot.edge(node_id, child_id)
 
-    return children, dot
+                children.append(partial(node_get_dot, forest, child_id, False, dot))
+
+        return children, dot
 
 def plane_normal(alpha, beta, dimension):
     return tuple(alpha.get(i, 0) - beta.get(i, 0) for i in range(dimension))
