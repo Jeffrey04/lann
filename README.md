@@ -9,6 +9,8 @@ It does not generate multiple trees to improve precision and recall for now. Als
 ## Pre-requisites
 
 * Python 3.4+
+* Graphviz
+* lmdb
 
 ## Example Usage
 
@@ -21,15 +23,16 @@ size, dim = 25000, 5
 
 print('generating points')
 pmeta, points = points_add([[gauss(0, 1) for __ in range(dim)] for _ in range(size)],
-                    dim,
-                    'list',
-                    [uuid4() for _ in range(size)])
+                           'pointsmdb'
+                           dim,
+                           'list',
+                           [uuid4() for _ in range(size)])
 
 print('generating query')
 query = point_convert((1/3., 1/3.), 'list')
 
 print('generating forest')
-fmeta, forest = forest_build(points, pmeta, 25, leaf_max=5, n_jobs=4)
+fmeta, forest = forest_build(points, 'forestmdb', pmeta, 25, leaf_max=5, n_jobs=4)
 
 print('search')
 idx, distance = search(query, points, pmeta, forest, fmeta, 1)[0]
@@ -37,13 +40,14 @@ idx, distance = search(query, points, pmeta, forest, fmeta, 1)[0]
 
 ## API
 
-### points_add(points, dimension, ptype, identifiers=None)
+### points_add(points, filename, dimension, ptype, identifiers=None)
 
 * `points`: an array of points
+* `filename`: where to save the points
 * `dimension`: the dimension of `points`
 * `ptype`: points are either `list` (a list of numeric values), or `gensim` for gensim-like corpus
 * `identifiers` (optional, defaulted to `None`): an array of identifiers if applicable, otherwise a list of uuid4 is assigned to each of the point
-* Returns: a pair of dictionaries where the first item stores the `dimension` and the second stores `identifier` as key, and point as value
+* Returns: a tuple where the first being a dictionary storing the `dimension` and the second being a lmdb environment storing identifiers as key and points as values
 
 ### point_convert(vector, ptype)
 
@@ -51,14 +55,15 @@ idx, distance = search(query, points, pmeta, forest, fmeta, 1)[0]
 * `ptype`: points are either `list` (a list of numeric values), or `gensim` for gensim-like corpus
 * Returns: point recognized by lann
 
-### forest_build(points, tree_count, leaf_max=5, n_jobs=1, batch_size=10000)
+### forest_build(points, filename, tree_count, leaf_max=5, n_jobs=1, batch_size=10000)
 
 * `points`: output of `points_add`
+* `filename`: where to save the forest
 * `tree_count`: number of trees to build
 * `leaf_max` (optional, defaulted to `5`): maximum number of points to be stored in a leaf node
 * `n_jobs` (optional, defaulted to `1`): maximum number of processes to spawn
 * `batch_size` (optional, defaulted to `10000`): only usable when `n_jobs` > 1, defines how many nodes to build in a batch
-* Returns: a pair of dictionaries where the first stores the forest `count`, `leaf_max` and `roots` (ids for root nodes), and the second stores `id` as key and node details as value
+* Returns: a tuple where the first being a dictionary storing the forest's `count`, `leaf_max` and `roots` (identifiers for root nodes), and the second being an lmdb environment storing identifiers as key, and nodes as values
 
 ### search(query, points, pmeta, forest, fmeta, n, threshold=None, n_jobs=1)
 
