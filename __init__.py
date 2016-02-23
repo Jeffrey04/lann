@@ -258,29 +258,30 @@ def progress_log(caption, progress, total):
 
     to_print and logging.info('{} {: >6.2f}%'.format(caption, progress[-1] / total * 100))
 
-def query_get_children(query, forest, threshold, multiplier, node_id):
-    result, delta = [], forest[node_id]['func'](query)
+def query_get_children(query, node, threshold, multiplier):
+    result, delta = [], node['func'](query)
 
     if threshold > 0 and delta > 0 and delta <= threshold:
         result.append((multiplier * 0.9,
-                       forest[node_id]['children'][False]))
+                       node['children'][False]))
         result.append((multiplier * 1.,
-                       forest[node_id]['children'][True]))
+                       node['children'][True]))
     elif threshold > 0 and delta <= 0 and -threshold <= delta:
         result.append((multiplier * 1.,
-                       forest[node_id]['children'][False]))
+                       node['children'][False]))
         result.append((multiplier * 0.9,
-                       forest[node_id]['children'][True]))
+                       node['children'][True]))
     else:
         result.append((multiplier * 1.,
-                       forest[node_id]['children'][delta > 0]))
+                       node['children'][delta > 0]))
 
     return result
 
 def query_neighbourhood_multi(nodes, forest, threshold, n_jobs):
     result = []
 
-    with ThreadPoolExecutor(max_workers=n_jobs) as pool:
+    with ThreadPoolExecutor(max_workers=n_jobs) as pool, \
+        forest.begin() as txn:
         while nodes:
             nodes_next, jobs = [], []
 
@@ -288,15 +289,16 @@ def query_neighbourhood_multi(nodes, forest, threshold, n_jobs):
                 _job = []
 
                 for multiplier, node_id in nodes[idx:1000]:
-                    if forest[node_id]['type'] == 'leaf':
-                        result.append((1 - multiplier, forest[node_id]))
+                    node = pickle.loads(txn.get(node_id.encode('ascii')))
+
+                    if node['type'] == 'leaf':
+                        result.append((1 - multiplier, node))
                     else:
                         _job.append(partial(query_get_children,
                                             query,
-                                            forest,
+                                            node,
                                             threshold,
-                                            multiplier,
-                                            node_id))
+                                            multiplier))
 
                 jobs.append(pool.submit(batch_build, _job))
 
@@ -310,32 +312,34 @@ def query_neighbourhood_multi(nodes, forest, threshold, n_jobs):
 def query_neighbourhood_single(nodes, forest, threshold):
     result = []
 
-    while nodes:
-        nodes_next = []
+    with forest.begin() as txn:
+        while nodes:
+            nodes_next = []
 
-        for multiplier, node_id in nodes:
-            if forest[node_id]['type'] == 'leaf':
-                result.append((1 - multiplier, forest[node_id]))
-            else:
-                delta = forest[node_id]['func'](query)
-
-                if threshold > 0 and delta > 0 and delta <= threshold:
-                    nodes_next.append((multiplier * 0.9,
-                                       forest[node_id]['children'][False]))
-                    nodes_next.append((multiplier * 1.,
-                                       forest[node_id]['children'][True]))
-                elif threshold > 0 and delta <= 0 and -threshold <= delta:
-                    nodes_next.append((multiplier * 1.,
-                                       forest[node_id]['children'][False]))
-                    nodes_next.append((multiplier * 0.9,
-                                       forest[node_id]['children'][True]))
+            for multiplier, node_id in nodes:
+                node = pickle.loads(txn.get(node_id.encode('ascii')))
+                if node['type'] == 'leaf':
+                    result.append((1 - multiplier, node))
                 else:
-                    nodes_next.append((multiplier * 1.,
-                                       forest[node_id]['children'][delta > 0]))
+                    delta = node['func'](query)
 
-        nodes = nodes_next
+                    if threshold > 0 and delta > 0 and delta <= threshold:
+                        nodes_next.append((multiplier * 0.9,
+                                           node['children'][False]))
+                        nodes_next.append((multiplier * 1.,
+                                           node['children'][True]))
+                    elif threshold > 0 and delta <= 0 and -threshold <= delta:
+                        nodes_next.append((multiplier * 1.,
+                                           node['children'][False]))
+                        nodes_next.append((multiplier * 0.9,
+                                           node['children'][True]))
+                    else:
+                        nodes_next.append((multiplier * 1.,
+                                           node['children'][delta > 0]))
 
-    return result
+            nodes = nodes_next
+
+        return result
 
 def search(query, points, pmeta, forest, fmeta, n=1, threshold=None, n_jobs=1):
     neighbourhood = forest_query_neighbourhood(query,
@@ -346,12 +350,13 @@ def search(query, points, pmeta, forest, fmeta, n=1, threshold=None, n_jobs=1):
 
     result, candidate_max = {}, max(n, fmeta['leaf_max']) * fmeta['count']
 
-    for idx in chain.from_iterable(leaf['children'] for _, leaf in sorted(neighbourhood, key=lambda _: _[0])):
-        if idx not in result:
-            result[idx] = distance_euclidean(query, points[idx], pmeta['dimension'])
+    with points.begin() as txn:
+        for idx in chain.from_iterable(leaf['children'] for _, leaf in sorted(neighbourhood, key=lambda _: _[0])):
+            if idx not in result:
+                result[idx] = distance_euclidean(query, pickle.loads(txn.get(idx)), pmeta['dimension'])
 
-            if len(result) >= candidate_max:
-                break
+                if len(result) >= candidate_max:
+                    break
 
     return sorted(result.items(), key=lambda _: _[-1])[:n]
 
