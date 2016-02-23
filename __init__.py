@@ -28,30 +28,31 @@ def batch_group_keys(sequence, keys, tree_count):
 def distance_euclidean(alpha, beta, dimension):
     return sqrt(sum(pow(alpha.get(i, 0) - beta.get(i, 0), 2) for i in range(dimension)))
 
-def forest_build(points, pmeta, tree_count, leaf_max=5, n_jobs=1, batch_size=1000):
-    forest = {}
+def forest_build(points, filename, pmeta, tree_count, leaf_max=5, n_jobs=1, batch_size=1000):
+    forest = lmdb.open(filename)
 
-    batches = batch_group_keys(batch_get_sequence(len(points), leaf_max),
-                               list(points.keys()),
+    batches = batch_group_keys(batch_get_sequence(points.stat()['entries'], leaf_max),
+                               [key for key, _ in points.begin().cursor()],
                                tree_count)
 
     meta = {'count': tree_count,
             'leaf_max': leaf_max,
             'roots': list(zip(*batches))[0]}
 
-    builders = [partial(node_build, points, pmeta, keys, root_id, leaf_max)
+    builders = [partial(node_build, points.path(), pmeta, keys, root_id, leaf_max)
                 for root_id, keys
                 in batches]
 
-    if n_jobs == 1:
-        forest = forest_build_single(builders, len(points) * tree_count)
-    else:
-        forest = forest_build_multi(builders, len(points) * tree_count, n_jobs, batch_size)
+    with forest.begin(write=True) as txn:
+        if n_jobs == 1:
+            forest_build_single(builders, txn, points.stat()['entries'] * tree_count)
+        else:
+            forest_build_multi(builders, txn, points.stat()['entries'] * tree_count, n_jobs, batch_size)
 
     return meta, forest
 
-def forest_build_multi(builders, forest_total, n_jobs, batch_size):
-    forest, progress = {}, [0]
+def forest_build_multi(builders, txn, forest_total, n_jobs, batch_size):
+    progress = [0]
 
     with ProcessPoolExecutor(max_workers=n_jobs) as pool:
         while builders:
@@ -67,15 +68,13 @@ def forest_build_multi(builders, forest_total, n_jobs, batch_size):
 
                         progress_log('Forest building progress', progress, forest_total)
 
-                    forest[node['id']] = node
+                    txn.put(node['id'].encode('ascii'), pickle.dumps(node))
                     builders_next.append(builders_sub)
 
             builders = list(chain.from_iterable(builders_next))
 
-        return forest
-
-def forest_build_single(builders, forest_total):
-    forest, progress = {}, [0]
+def forest_build_single(builders, txn, forest_total):
+    progress = [0]
 
     while builders:
         builders_next = []
@@ -88,12 +87,10 @@ def forest_build_single(builders, forest_total):
 
                 progress_log('Forest building progress', progress, forest_total)
 
-            forest[node['id']] = node
+            txn.put(node['id'].encode('ascii'), pickle.dumps(node))
             builders_next.append(builders_sub)
 
         builders = list(chain.from_iterable(builders_next))
-
-    return forest
 
 def forest_get_dot(forest, fmeta, count=1):
     result = Digraph()
@@ -127,7 +124,7 @@ def forest_query_neighbourhood(query, forest, fmeta, threshold, n_jobs):
 
     return result
 
-def node_build(points, pmeta, point_ids, node_id, leaf_max=5):
+def node_build(points_dbpath, pmeta, point_ids, node_id, leaf_max=5):
     node, children = {}, []
 
     if len(point_ids) <= leaf_max:
@@ -138,7 +135,10 @@ def node_build(points, pmeta, point_ids, node_id, leaf_max=5):
             'children': point_ids
         }
     else:
-        split = split_points([points[idx] for idx in point_ids],
+        with lmdb.open(points_dbpath).begin() as txn:
+            points = dict(zip(point_ids, [pickle.loads(txn.get(idx)) for idx in point_ids]))
+
+        split = split_points([point for _, point in points.items()],
                              pmeta['dimension'])
         distance_calc = plane_point_distance_calculator(
             plane_normal(*split, dimension=pmeta['dimension']),
@@ -159,13 +159,13 @@ def node_build(points, pmeta, point_ids, node_id, leaf_max=5):
         }
 
         children.append(partial(node_build,
-                                points,
+                                points_dbpath,
                                 pmeta,
                                 branches[False],
                                 child_ids[False],
                                 leaf_max))
         children.append(partial(node_build,
-                                points,
+                                points_dbpath,
                                 pmeta,
                                 branches[True],
                                 child_ids[True],
@@ -234,9 +234,9 @@ def point_convert_invalid(*_):
 
 def points_add(vectors, filename, dimension, ptype, identifiers=None):
     meta = {'dimension': dimension}
-    env = lmdb.open(filename)
+    points = lmdb.open(filename)
 
-    with env.begin(write=True) as txn:
+    with points.begin(write=True) as txn:
         if identifiers is None:
             identifiers = (str(uuid4()) for _ in range(len(vectors)))
         else:
@@ -246,7 +246,7 @@ def points_add(vectors, filename, dimension, ptype, identifiers=None):
             txn.put(next(identifiers).encode('ascii'),
                     pickle.dumps(point_convert(vector, ptype)))
 
-    return meta, env
+    return meta, points
 
 def progress_log(caption, progress, total):
     to_print = False
@@ -359,19 +359,3 @@ def split_points(points, dimension):
     result = sample(points, 2)
 
     return result if reduce(lambda _result, incoming: _result or sub(*[result[i].get(i, 0) for i in range(2)]) != 0, range(dimension), False) else split_points(points)
-
-from uuid import uuid4
-from random import gauss
-from pprint import pprint
-from timeit import default_timer
-from shutil import rmtree
-
-logging.basicConfig(level=logging.INFO)
-
-def brute_search(query, points, pmeta):
-    with points.begin() as txn:
-        result = [(key, distance_euclidean(query, pickle.loads(value), pmeta['dimension']))
-                  for key, value
-                  in txn.cursor()]
-
-    return sorted(result, key=lambda _: _[-1])
