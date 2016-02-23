@@ -29,7 +29,7 @@ def distance_euclidean(alpha, beta, dimension):
     return sqrt(sum(pow(alpha.get(i, 0) - beta.get(i, 0), 2) for i in range(dimension)))
 
 def forest_build(points, filename, pmeta, tree_count, leaf_max=5, n_jobs=1, batch_size=1000):
-    forest = lmdb.open(filename)
+    forest = lmdb.open(filename, map_size=2**40)
 
     batches = batch_group_keys(batch_get_sequence(points.stat()['entries'], leaf_max),
                                [key for key, _ in points.begin().cursor()],
@@ -118,9 +118,9 @@ def forest_query_neighbourhood(query, forest, fmeta, threshold, n_jobs):
     nodes = [(1., root_id) for root_id in fmeta['roots']]
 
     if n_jobs == 1:
-        result = query_neighbourhood_single(nodes, forest, threshold)
+        result = query_neighbourhood_single(query, nodes, forest, threshold)
     else:
-        result = query_neighbourhood_multi(nodes, forest, threshold, n_jobs)
+        result = query_neighbourhood_multi(query, nodes, forest, threshold, n_jobs)
 
     return result
 
@@ -135,7 +135,7 @@ def node_build(points_dbpath, pmeta, point_ids, node_id, leaf_max=5):
             'children': point_ids
         }
     else:
-        with lmdb.open(points_dbpath).begin() as txn:
+        with lmdb.open(points_dbpath, map_size=2**40).begin() as txn:
             points = dict(zip(point_ids, [pickle.loads(txn.get(idx)) for idx in point_ids]))
 
         split = split_points([point for _, point in points.items()],
@@ -237,7 +237,7 @@ def point_convert_invalid(*_):
 
 def points_add(vectors, filename, dimension, ptype, identifiers=None):
     meta = {'dimension': dimension}
-    points = lmdb.open(filename)
+    points = lmdb.open(filename, map_size=2**40)
 
     with points.begin(write=True) as txn:
         if identifiers is None:
@@ -280,7 +280,7 @@ def query_get_children(query, node, threshold, multiplier):
 
     return result
 
-def query_neighbourhood_multi(nodes, forest, threshold, n_jobs):
+def query_neighbourhood_multi(query, nodes, forest, threshold, n_jobs):
     result = []
 
     with ThreadPoolExecutor(max_workers=n_jobs) as pool, \
@@ -312,7 +312,7 @@ def query_neighbourhood_multi(nodes, forest, threshold, n_jobs):
 
         return result
 
-def query_neighbourhood_single(nodes, forest, threshold):
+def query_neighbourhood_single(query, nodes, forest, threshold):
     result = []
 
     with forest.begin() as txn:
