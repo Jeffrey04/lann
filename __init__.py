@@ -13,7 +13,7 @@ def batch_build(builders):
     return [builder() for builder in builders]
 
 def batch_get_sequence(total, leaf_max):
-    batches, batch_size = [], ceil(total / floor(total / (leaf_max * 100)))
+    batches, batch_size = [], ceil(total / max(1, floor(total / (leaf_max * 100))))
 
     for idx in range(0, total, batch_size):
         batches.append((idx, min(idx + batch_size, total)))
